@@ -2,9 +2,10 @@ import asyncio
 from base64 import b64encode
 from dataclasses import dataclass, field
 from datetime import datetime
+import json
 import logging
 import os
-from typing import Any, Literal, Optional
+from typing import Any, AsyncIterator, Literal, Optional
 
 import discord
 from discord.app_commands import Choice
@@ -56,6 +57,70 @@ def get_text_content(content: Any) -> str:
     if isinstance(content, list):
         return "".join(part if isinstance(part, str) else (part.get("text") or "") for part in content if not isinstance(part, dict) or part.get("type") != "thinking")
     return str(content)
+
+
+def extract_conversation_text(node: Any, citations: list[dict[str, Any]]) -> str:
+    if isinstance(node, dict):
+        node_type = node.get("type")
+
+        if node_type == "text" and isinstance(node.get("text"), str):
+            return node["text"]
+
+        if node_type in ("citation", "source"):
+            citations.append(node)
+            return ""
+
+        if node_type in ("thinking", "reasoning", "tool_call", "tool_execution", "tool_result", "handoff"):
+            return ""
+
+        return "".join(extract_conversation_text(value, citations) for value in node.values())
+
+    if isinstance(node, list):
+        return "".join(extract_conversation_text(item, citations) for item in node)
+
+    return ""
+
+
+def find_finish_reason(node: Any) -> Optional[str]:
+    if isinstance(node, dict):
+        if isinstance(node.get("finish_reason"), str):
+            return node["finish_reason"]
+
+        if node.get("type") in ("end", "done", "finish"):
+            return "stop"
+
+        for value in node.values():
+            if finish_reason := find_finish_reason(value):
+                return finish_reason
+
+    elif isinstance(node, list):
+        for item in node:
+            if finish_reason := find_finish_reason(item):
+                return finish_reason
+
+    return None
+
+
+async def stream_conversation(base_url: str, api_key: str, body: dict[str, Any], citations: list[dict[str, Any]]) -> AsyncIterator[tuple[str, Optional[str]]]:
+    url = base_url.rstrip("/") + "/conversations"
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    async with httpx_client.stream("POST", url, json=body, headers=headers, timeout=httpx.Timeout(600.0, connect=10.0)) as response:
+        if "text/event-stream" not in (response.headers.get("content-type") or ""):
+            event = response.json()
+            yield extract_conversation_text(event, citations), find_finish_reason(event)
+            return
+
+        async for line in response.aiter_lines():
+            if not (data := line.removeprefix("data:").strip()):
+                continue
+
+            try:
+                event = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+
+            yield extract_conversation_text(event, citations), find_finish_reason(event)
 
 
 def get_config(filename: str = "config.yaml") -> dict[str, Any]:
@@ -279,8 +344,19 @@ async def on_message(new_msg: discord.Message) -> None:
     curr_content = finish_reason = None
     response_msgs = []
     response_contents = []
+    citations: list[dict[str, Any]] = []
 
-    openai_kwargs = dict(model=model, messages=messages[::-1], stream=True, extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body)
+    use_conversations = provider_config.get("api_type") == "conversations"
+
+    if use_conversations:
+        conversation_body = dict(model=model, inputs=messages[::-1], store=False, stream=True)
+
+        if tools := (model_parameters or {}).get("tools"):
+            conversation_body["tools"] = tools
+
+        conversation_body.update({key: value for key, value in (extra_body or {}).items() if key != "tools"})
+    else:
+        openai_kwargs = dict(model=model, messages=messages[::-1], stream=True, extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body)
 
     if use_plain_responses := config.get("use_plain_responses", False):
         max_message_length = 4000
@@ -296,19 +372,27 @@ async def on_message(new_msg: discord.Message) -> None:
         msg_nodes[response_msg.id] = MsgNode(parent_msg=new_msg)
         await msg_nodes[response_msg.id].lock.acquire()
 
-    try:
-        async with new_msg.channel.typing():
+    async def response_stream() -> AsyncIterator[tuple[str, Optional[str]]]:
+        if use_conversations:
+            async for text, finish in stream_conversation(base_url, api_key, conversation_body, citations):
+                yield text, finish
+        else:
             async for chunk in await openai_client.chat.completions.create(**openai_kwargs):
-                if finish_reason != None:
-                    break
-
                 if not (choice := chunk.choices[0] if chunk.choices else None):
                     continue
 
-                finish_reason = choice.finish_reason
+                yield get_text_content(choice.delta.content), choice.finish_reason
+
+    try:
+        async with new_msg.channel.typing():
+            async for curr_text, chunk_finish in response_stream():
+                if finish_reason != None:
+                    break
+
+                finish_reason = chunk_finish
 
                 prev_content = curr_content or ""
-                curr_content = get_text_content(choice.delta.content)
+                curr_content = curr_text
 
                 new_content = prev_content if finish_reason == None else (prev_content + curr_content)
 
@@ -343,6 +427,15 @@ async def on_message(new_msg: discord.Message) -> None:
             if use_plain_responses:
                 for content in response_contents:
                     await reply_helper(view=LayoutView().add_item(TextDisplay(content=content)))
+
+            if citations:
+                unique_citations = list({citation.get("url"): citation for citation in citations if citation.get("url")}.values())
+                sources = "\n".join(f"- {citation.get('title') or citation.get('url')}\n  <{citation['url']}>" for citation in unique_citations[:10])
+
+                if use_plain_responses:
+                    await reply_helper(view=LayoutView().add_item(TextDisplay(content=f"Sources:\n{sources}")))
+                else:
+                    await reply_helper(embed=discord.Embed(description=f"Sources:\n{sources}", color=EMBED_COLOR_COMPLETE), silent=True)
 
     except Exception:
         logging.exception("Error while generating response")

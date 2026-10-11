@@ -31,10 +31,19 @@ providers:
     base_url: https://api.mistral.ai/v1
     api_key_env: MISTRAL_API_KEY
 
+  mistral-conversations:
+    api_type: conversations
+    base_url: https://api.mistral.ai/v1
+    api_key_env: MISTRAL_API_KEY
+
 models:
   mistral/mistral-large-latest:vision:
 
   mistral/zai-glm-5-3:
+
+  mistral-conversations/mistral-medium-latest:
+    tools:
+      - type: web_search
 
 system_prompt: |
   You are Baymax, a Discord assistant. You are calm, reliable, efficient, and supportive.
