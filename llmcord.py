@@ -140,7 +140,7 @@ last_task_time = 0
 
 intents = discord.Intents.default()
 intents.message_content = True
-activity = discord.CustomActivity(name=(config.get("status_message") or "github.com/jakobdylanc/llmcord")[:128])
+activity = discord.Activity(type=discord.ActivityType.watching, name=(config.get("status_message") or "github.com/jakobdylanc/llmcord")[:128])
 discord_bot = commands.Bot(intents=intents, activity=activity, command_prefix=None)
 
 httpx_client = httpx.AsyncClient()
@@ -153,7 +153,9 @@ def status_text() -> str:
 
 
 async def update_status() -> None:
-    await discord_bot.change_presence(activity=discord.CustomActivity(name=status_text()))
+    # Discord clients render bots with a CustomActivity as offline; use a
+    # watching activity so the presence dot correctly shows online
+    await discord_bot.change_presence(status=discord.Status.online, activity=discord.Activity(type=discord.ActivityType.watching, name=status_text()))
 
 
 async def notify_admins(message: str) -> None:
