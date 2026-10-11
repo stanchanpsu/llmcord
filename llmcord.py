@@ -244,6 +244,7 @@ async def on_ready() -> None:
 
     await discord_bot.tree.sync()
     await update_status()
+    logging.info(f"Presence: {discord_bot.status}, activity: {discord_bot.activity}")
 
     if not startup_notified:
         startup_notified = True
