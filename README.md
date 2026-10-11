@@ -108,6 +108,58 @@ Or run local models with:
    docker compose up
    ```
 
+## Fork additions (conversations branch)
+
+This fork's `conversations` branch extends upstream llmcord with:
+
+### Mistral Conversations API provider
+
+Providers with `api_type: conversations` call Mistral's `/v1/conversations` endpoint instead of `/v1/chat/completions`, enabling server-side tools per model:
+
+```yaml
+providers:
+  mistral-conversations:
+    api_type: conversations
+    base_url: https://api.mistral.ai/v1
+    api_key_env: MISTRAL_API_KEY
+
+models:
+  mistral-conversations/mistral-large-latest:vision:
+    tools:
+      - type: web_search
+      - type: code_interpreter
+```
+
+- Requests are stateless (`store: false`) — Discord reply chains remain the conversation history, so branching keeps working
+- The system prompt is sent via the `instructions` field (the endpoint only accepts `user`/`assistant` roles in `inputs`)
+- Search/code tool executions are handled server-side; tool events are skipped and citations render as a "Sources" message after the reply
+
+### Comma-separated env IDs
+
+Any `*_ids` setting can be sourced from a comma-separated environment variable (converted to an integer list):
+
+```yaml
+permissions:
+  users:
+    admin_ids_env: ADMIN_IDS
+```
+
+### Always-listen channels
+
+```yaml
+always_listen_ids_env: ALWAYS_LISTEN_IDS
+```
+
+Channels listed here (comma-separated IDs via env) get a response to every human message without an @-mention. Note: the bot still only sees reply chains, not the full channel conversation (see issue tracker for planned group-context support).
+
+### Operational niceties
+
+- `startup_message` / `shutdown_message`: DM every admin when the bot comes up (after an API warmup ping) and on graceful Ctrl+C shutdown
+- The bot's Discord status shows the active model and updates on `/model` switches (uses a watching-type activity so the presence dot renders correctly)
+- API errors from the Conversations endpoint surface the provider's error detail in logs
+
+`main` tracks the stable completions-only setup; `conversations` is the experimental branch.
+
 ## Notes
 
 - If you're having issues, try my suggestions [here](https://github.com/jakobdylanc/llmcord/issues/19)
