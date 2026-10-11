@@ -37,11 +37,12 @@ providers:
     api_key_env: MISTRAL_API_KEY
 
 models:
-  mistral/mistral-large-latest:vision:
+  mistral-conversations/mistral-large-latest:vision:
+    tools:
+      - type: web_search
+      - type: code_interpreter
 
-  mistral/zai-glm-5-3:
-
-  mistral-conversations/mistral-medium-latest:
+  mistral-conversations/zai-glm-5-3:
     tools:
       - type: web_search
 
