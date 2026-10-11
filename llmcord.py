@@ -152,10 +152,11 @@ def status_text() -> str:
     return (config.get("status_message") or f"model: {curr_model}")[:128]
 
 
-async def update_status() -> None:
+async def update_status(state: str = "", status: discord.Status = discord.Status.online) -> None:
     # Discord clients render bots with a CustomActivity as offline; use a
     # watching activity so the presence dot correctly shows online
-    await discord_bot.change_presence(status=discord.Status.online, activity=discord.Activity(type=discord.ActivityType.watching, name=status_text()))
+    text = state or status_text()
+    await discord_bot.change_presence(status=status, activity=discord.Activity(type=discord.ActivityType.watching, name=text[:128]))
 
 
 async def warmup_api() -> None:
@@ -243,7 +244,7 @@ async def on_ready() -> None:
         logging.info(f"\n\nBOT INVITE URL:\nhttps://discord.com/oauth2/authorize?client_id={client_id}&permissions=412317191168&scope=bot\n")
 
     await discord_bot.tree.sync()
-    await update_status()
+    await update_status("warming up...")
     logging.info(f"Presence: {discord_bot.status}, activity: {discord_bot.activity}")
 
     if not startup_notified:
@@ -255,6 +256,8 @@ async def on_ready() -> None:
             logging.info("API warmup complete")
         except Exception:
             logging.warning("API warmup failed; continuing startup", exc_info=True)
+
+        await update_status()
 
         if startup_message := config.get("startup_message"):
             await notify_admins(startup_message)
@@ -537,6 +540,10 @@ async def main() -> None:
     bot_task = asyncio.create_task(discord_bot.start(config["bot_token"]))
 
     await shutdown_event.wait()
+
+    # Show a shutting-down presence before the connection drops
+    await update_status("shutting down...", status=discord.Status.dnd)
+    await asyncio.sleep(3)
 
     if shutdown_message := config.get("shutdown_message"):
         await notify_admins(shutdown_message)
