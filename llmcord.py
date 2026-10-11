@@ -158,6 +158,26 @@ async def update_status() -> None:
     await discord_bot.change_presence(status=discord.Status.online, activity=discord.Activity(type=discord.ActivityType.watching, name=status_text()))
 
 
+async def warmup_api() -> None:
+    # Send a throwaway request to the active provider/model and discard the
+    # response, so the first real message skips connection setup
+    provider, model = curr_model.removesuffix(":vision").split("/", 1)
+    provider_config = config["providers"][provider]
+
+    base_url = provider_config["base_url"]
+    api_key = provider_config.get("api_key", "sk-no-key-required")
+
+    if provider_config.get("api_type") == "conversations":
+        body = dict(model=model, inputs=[dict(role="user", content="ping")], store=False, stream=True)
+        async for _ in stream_conversation(base_url, api_key, body, []):
+            pass
+    else:
+        openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        async for chunk in await openai_client.chat.completions.create(model=model, messages=[dict(role="user", content="ping")], stream=True):
+            if chunk.choices and chunk.choices[0].finish_reason:
+                break
+
+
 async def notify_admins(message: str) -> None:
     for admin_id in config["permissions"]["users"]["admin_ids"]:
         try:
@@ -227,6 +247,13 @@ async def on_ready() -> None:
 
     if not startup_notified:
         startup_notified = True
+
+        try:
+            async with asyncio.timeout(60):
+                await warmup_api()
+            logging.info("API warmup complete")
+        except Exception:
+            logging.warning("API warmup failed; continuing startup", exc_info=True)
 
         if startup_message := config.get("startup_message"):
             await notify_admins(startup_message)
