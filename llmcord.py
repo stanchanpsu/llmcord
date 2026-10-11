@@ -127,9 +127,22 @@ async def stream_conversation(base_url: str, api_key: str, body: dict[str, Any],
             yield parse_conversation_event(event, citations)
 
 
+last_config: Optional[dict[str, Any]] = None
+
+
 def get_config(filename: str = "config.yaml") -> dict[str, Any]:
+    global last_config
+
     with open(filename, encoding="utf-8") as file:
-        return resolve_env(yaml.safe_load(file))
+        new_config = resolve_env(yaml.safe_load(file))
+
+    if last_config is not None and new_config != last_config:
+        changed_keys = sorted(key for key in set(new_config) | set(last_config) if new_config.get(key) != last_config.get(key))
+        logging.info(f"Config hot-reloaded (changed: {', '.join(changed_keys)})")
+
+    last_config = new_config
+
+    return new_config
 
 
 config = get_config()
