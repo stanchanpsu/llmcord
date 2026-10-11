@@ -266,13 +266,18 @@ async def on_message(new_msg: discord.Message) -> None:
 
     is_dm = new_msg.channel.type == discord.ChannelType.private
 
-    if (not is_dm and discord_bot.user not in new_msg.mentions) or new_msg.author.bot:
+    if new_msg.author.bot:
         return
 
     role_ids = set(role.id for role in getattr(new_msg.author, "roles", ()))
     channel_ids = set(filter(None, (new_msg.channel.id, getattr(new_msg.channel, "parent_id", None), getattr(new_msg.channel, "category_id", None))))
 
     config = await asyncio.to_thread(get_config)
+
+    always_listening = not is_dm and new_msg.channel.id in config.get("always_listen_ids", [])
+
+    if not is_dm and not always_listening and discord_bot.user not in new_msg.mentions:
+        return
 
     allow_dms = config.get("allow_dms", True)
 

@@ -15,6 +15,9 @@ max_messages: 25
 use_plain_responses: true
 allow_dms: true
 
+# Channels where the bot responds without being @-mentioned (IDs via env, comma-separated)
+always_listen_ids_env: ALWAYS_LISTEN_IDS
+
 permissions:
   users:
     admin_ids_env: ADMIN_IDS
