@@ -3,7 +3,10 @@
 bot_token_env: DISCORD_BOT_TOKEN
 client_id_env: DISCORD_CLIENT_ID
 
-status_message: 
+status_message:
+
+startup_message: "Hello. I am Baymax, your personal Discord companion. I am online and ready to assist you."
+shutdown_message: "I must power down for a little while. Please take care of yourself, and I will see you again soon."
 
 max_text: 100000
 max_images: 5

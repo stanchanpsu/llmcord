@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import logging
 import os
+import signal
 from typing import Any, AsyncIterator, Literal, Optional
 
 import discord
@@ -144,6 +145,17 @@ discord_bot = commands.Bot(intents=intents, activity=activity, command_prefix=No
 
 httpx_client = httpx.AsyncClient()
 
+startup_notified = False
+
+
+async def notify_admins(message: str) -> None:
+    for admin_id in config["permissions"]["users"]["admin_ids"]:
+        try:
+            if user := await discord_bot.fetch_user(admin_id):
+                await user.send(message)
+        except discord.HTTPException:
+            logging.exception("Failed to send admin DM")
+
 
 @dataclass
 class MsgNode:
@@ -192,12 +204,20 @@ async def model_autocomplete(interaction: discord.Interaction, curr_str: str) ->
 
 @discord_bot.event
 async def on_ready() -> None:
+    global startup_notified
+
     logging.info(f"Logged in as {discord_bot.user} (default model: {curr_model})")
 
     if client_id := config.get("client_id"):
         logging.info(f"\n\nBOT INVITE URL:\nhttps://discord.com/oauth2/authorize?client_id={client_id}&permissions=412317191168&scope=bot\n")
 
     await discord_bot.tree.sync()
+
+    if not startup_notified:
+        startup_notified = True
+
+        if startup_message := config.get("startup_message"):
+            await notify_admins(startup_message)
 
 
 @discord_bot.event
@@ -460,7 +480,24 @@ async def on_message(new_msg: discord.Message) -> None:
 
 
 async def main() -> None:
-    await discord_bot.start(config["bot_token"])
+    loop = asyncio.get_running_loop()
+    shutdown_event = asyncio.Event()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, shutdown_event.set)
+        except NotImplementedError:
+            pass
+
+    bot_task = asyncio.create_task(discord_bot.start(config["bot_token"]))
+
+    await shutdown_event.wait()
+
+    if shutdown_message := config.get("shutdown_message"):
+        await notify_admins(shutdown_message)
+
+    await discord_bot.close()
+    await bot_task
 
 
 try:
