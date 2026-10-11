@@ -148,6 +148,14 @@ httpx_client = httpx.AsyncClient()
 startup_notified = False
 
 
+def status_text() -> str:
+    return (config.get("status_message") or f"model: {curr_model}")[:128]
+
+
+async def update_status() -> None:
+    await discord_bot.change_presence(activity=discord.CustomActivity(name=status_text()))
+
+
 async def notify_admins(message: str) -> None:
     for admin_id in config["permissions"]["users"]["admin_ids"]:
         try:
@@ -183,6 +191,7 @@ async def model_command(interaction: discord.Interaction, model: str) -> None:
             curr_model = model
             output = f"Model switched to: `{model}`"
             logging.info(output)
+            await update_status()
         else:
             output = "You don't have permission to change the model."
 
@@ -212,6 +221,7 @@ async def on_ready() -> None:
         logging.info(f"\n\nBOT INVITE URL:\nhttps://discord.com/oauth2/authorize?client_id={client_id}&permissions=412317191168&scope=bot\n")
 
     await discord_bot.tree.sync()
+    await update_status()
 
     if not startup_notified:
         startup_notified = True
