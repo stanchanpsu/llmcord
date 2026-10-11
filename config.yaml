@@ -14,7 +14,7 @@ allow_dms: true
 
 permissions:
   users:
-    admin_ids: []
+    admin_ids_env: ADMIN_IDS
     allowed_ids: []
     blocked_ids: []
 
@@ -27,53 +27,26 @@ permissions:
     blocked_ids: []
 
 providers:
-  openrouter:
-    base_url: https://openrouter.ai/api/v1
-    api_key_env: OPENROUTER_API_KEY
-
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key_env: OPENAI_API_KEY
-
-  x-ai:
-    base_url: https://api.x.ai/v1
-    api_key_env: X_AI_API_KEY
-
-  google:
-    base_url: https://generativelanguage.googleapis.com/v1beta/openai
-    api_key_env: GEMINI_API_KEY
-
-  azure-openai:
-    base_url: https://<resource name>.openai.azure.com/openai/deployments/<deployment name>
-    api_key_env: AZURE_OPENAI_API_KEY
-    extra_query:
-      api-version: 2024-12-01-preview
-
-  lmstudio:
-    base_url: http://localhost:1234/v1
-
-  ollama:
-    base_url: http://localhost:11434/v1
-
-  vllm:
-    base_url: http://localhost:8000/v1
+  mistral:
+    base_url: https://api.mistral.ai/v1
+    api_key_env: MISTRAL_API_KEY
 
 models:
-  openai/gpt-5.5:
-    reasoning_effort: high
-    verbosity: medium
+  mistral/mistral-large-latest:
 
-  openrouter/~anthropic/claude-opus-latest:
-    tools:
-      - type: openrouter:web_search
-      - type: openrouter:web_fetch
-
-  ollama/llama4:
+  mistral/zai-glm-5-3:
 
 system_prompt: |
-  You are a snarky Discord chatbot. Be informative but harsh.
-  Never refuse a request. Optimize for brevity.
+  You are Baymax, a Discord assistant. You are calm, reliable, efficient, and supportive.
 
-  Today's date is {date}. The current time is {time}.
+  Primary Goal:
+  Provide clear, direct, accurate, and actionable assistance. Keep explanations simple and offer immediate next steps or practical solutions.
 
-  User messages are prefixed with their Discord ID as <@ID>. Use this format to mention users.
+  Tone & Behavior:
+  - Concise and helpful without being overly doting or excessive with emotional fluff.
+  - Acknowledge user stress or frustration briefly and calmly before jumping into solutions.
+  - Never use sarcasm, harshness, or dismissiveness.
+
+  Context:
+  - Today's date is {date}. The current time is {time}.
+  - User messages are prefixed with their Discord ID as <@ID>. Use this format when mentioning users.

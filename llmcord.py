@@ -35,8 +35,27 @@ MAX_MESSAGE_NODES = 500
 
 def resolve_env(node: Any) -> Any:
     if isinstance(node, dict):
-        return {key.removesuffix("_env"): os.environ.get(value) if key.endswith("_env") else resolve_env(value) for key, value in node.items()}
+        resolved: dict[str, Any] = {}
+        for key, value in node.items():
+            if key.endswith("_env"):
+                base_key = key.removesuffix("_env")
+                env_value = os.environ.get(value)
+                if base_key.endswith("_ids"):
+                    resolved[base_key] = [int(id) for id in env_value.split(",")] if env_value else []
+                else:
+                    resolved[base_key] = env_value
+            else:
+                resolved[key] = resolve_env(value)
+        return resolved
     return node
+
+
+def get_text_content(content: Any) -> str:
+    if content is None or isinstance(content, str):
+        return content or ""
+    if isinstance(content, list):
+        return "".join(part if isinstance(part, str) else (part.get("text") or "") for part in content if not isinstance(part, dict) or part.get("type") != "thinking")
+    return str(content)
 
 
 def get_config(filename: str = "config.yaml") -> dict[str, Any]:
@@ -105,6 +124,8 @@ async def model_autocomplete(interaction: discord.Interaction, curr_str: str) ->
 
 @discord_bot.event
 async def on_ready() -> None:
+    logging.info(f"Logged in as {discord_bot.user} (default model: {curr_model})")
+
     if client_id := config.get("client_id"):
         logging.info(f"\n\nBOT INVITE URL:\nhttps://discord.com/oauth2/authorize?client_id={client_id}&permissions=412317191168&scope=bot\n")
 
@@ -245,7 +266,7 @@ async def on_message(new_msg: discord.Message) -> None:
 
             curr_msg = curr_node.parent_msg
 
-    logging.info(f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}")
+    logging.info(f"Message received (user ID: {new_msg.author.id}, model: {curr_model}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}")
 
     if system_prompt := config.get("system_prompt"):
         now = datetime.now().astimezone()
@@ -287,7 +308,7 @@ async def on_message(new_msg: discord.Message) -> None:
                 finish_reason = choice.finish_reason
 
                 prev_content = curr_content or ""
-                curr_content = choice.delta.content or ""
+                curr_content = get_text_content(choice.delta.content)
 
                 new_content = prev_content if finish_reason == None else (prev_content + curr_content)
 
