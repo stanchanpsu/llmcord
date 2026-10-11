@@ -54,51 +54,50 @@ def resolve_env(node: Any) -> Any:
 def get_text_content(content: Any) -> str:
     if content is None or isinstance(content, str):
         return content or ""
+    if isinstance(content, dict):
+        return "" if content.get("type") == "thinking" else (content.get("text") or "")
     if isinstance(content, list):
         return "".join(part if isinstance(part, str) else (part.get("text") or "") for part in content if not isinstance(part, dict) or part.get("type") != "thinking")
     return str(content)
 
 
-def extract_conversation_text(node: Any, citations: list[dict[str, Any]]) -> str:
-    if isinstance(node, dict):
-        node_type = node.get("type")
+def extract_conversation_text(content: Any, citations: list[dict[str, Any]]) -> str:
+    if content is None or isinstance(content, str):
+        return content or ""
 
-        if node_type == "text" and isinstance(node.get("text"), str):
-            return node["text"]
+    if isinstance(content, list):
+        parts = []
 
-        if node_type in ("citation", "source"):
-            citations.append(node)
-            return ""
+        for part in content:
+            if isinstance(part, dict) and part.get("type") in ("citation", "source"):
+                citations.append(part)
+            else:
+                parts.append(get_text_content(part))
 
-        if node_type in ("thinking", "reasoning", "tool_call", "tool_execution", "tool_result", "handoff"):
-            return ""
-
-        return "".join(extract_conversation_text(value, citations) for value in node.values())
-
-    if isinstance(node, list):
-        return "".join(extract_conversation_text(item, citations) for item in node)
+        return "".join(parts)
 
     return ""
 
 
-def find_finish_reason(node: Any) -> Optional[str]:
-    if isinstance(node, dict):
-        if isinstance(node.get("finish_reason"), str):
-            return node["finish_reason"]
+def parse_conversation_event(event: Any, citations: list[dict[str, Any]]) -> tuple[str, Optional[str]]:
+    if not isinstance(event, dict):
+        return "", None
 
-        if node.get("type") in ("end", "done", "finish"):
-            return "stop"
+    event_type = event.get("type") or ""
 
-        for value in node.values():
-            if finish_reason := find_finish_reason(value):
-                return finish_reason
+    if event_type == "conversation.response.done":
+        return "", "stop"
 
-    elif isinstance(node, list):
-        for item in node:
-            if finish_reason := find_finish_reason(item):
-                return finish_reason
+    if event_type.startswith("tool.execution") or event_type == "conversation.response.started":
+        return "", None
 
-    return None
+    if isinstance(event.get("outputs"), list):
+        return "".join(extract_conversation_text(output.get("content"), citations) for output in event["outputs"] if isinstance(output, dict)), "stop"
+
+    if "content" in event:
+        return extract_conversation_text(event.get("content"), citations), None
+
+    return "", None
 
 
 async def stream_conversation(base_url: str, api_key: str, body: dict[str, Any], citations: list[dict[str, Any]]) -> AsyncIterator[tuple[str, Optional[str]]]:
@@ -106,9 +105,13 @@ async def stream_conversation(base_url: str, api_key: str, body: dict[str, Any],
     headers = {"Authorization": f"Bearer {api_key}"}
 
     async with httpx_client.stream("POST", url, json=body, headers=headers, timeout=httpx.Timeout(600.0, connect=10.0)) as response:
+        if response.status_code >= 400:
+            await response.aread()
+            raise RuntimeError(f"Conversations API error {response.status_code}: {response.text[:500]}")
+
         if "text/event-stream" not in (response.headers.get("content-type") or ""):
-            event = response.json()
-            yield extract_conversation_text(event, citations), find_finish_reason(event)
+            await response.aread()
+            yield parse_conversation_event(response.json(), citations)
             return
 
         async for line in response.aiter_lines():
@@ -120,7 +123,7 @@ async def stream_conversation(base_url: str, api_key: str, body: dict[str, Any],
             except json.JSONDecodeError:
                 continue
 
-            yield extract_conversation_text(event, citations), find_finish_reason(event)
+            yield parse_conversation_event(event, citations)
 
 
 def get_config(filename: str = "config.yaml") -> dict[str, Any]:
@@ -349,7 +352,12 @@ async def on_message(new_msg: discord.Message) -> None:
     use_conversations = provider_config.get("api_type") == "conversations"
 
     if use_conversations:
-        conversation_body = dict(model=model, inputs=messages[::-1], store=False, stream=True)
+        conversation_body = dict(model=model, store=False, stream=True)
+
+        if system_message := next((message for message in messages if message.get("role") == "system"), None):
+            conversation_body["instructions"] = system_message["content"]
+
+        conversation_body["inputs"] = [message for message in messages[::-1] if message.get("role") != "system"]
 
         if tools := (model_parameters or {}).get("tools"):
             conversation_body["tools"] = tools
